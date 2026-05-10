@@ -50,6 +50,25 @@ def load_categories() -> list[CategoryEntry]:
     ]
 
 
+def check_duplicate_slug(slug: str) -> bool:
+    """Retorna True se já existe artigo com esse slug na tabela `articles`.
+
+    Considera TODOS os status (pending/published/rejected/queue/etc) — duplicar
+    slug em qualquer estado não faz sentido.
+    """
+    if not slug:
+        return False
+    client = get_client()
+    response = (
+        client.table("articles")
+        .select("id", count="exact")
+        .eq("slug", slug)
+        .limit(1)
+        .execute()
+    )
+    return (response.count or 0) > 0
+
+
 def save_pending_article(article: dict) -> dict:
     """Insere artigo na tabela `articles` com status='pending'.
 
