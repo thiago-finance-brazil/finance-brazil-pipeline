@@ -35,7 +35,7 @@ class ImpactPoint(BaseModel):
 
 
 class GeneratedArticle(BaseModel):
-    """Matéria pronta pra gravar no Supabase com status='pending'.
+    """Matéria pronta pra gravar no Supabase com status='review'.
 
     Os bounds vêm da spec do Finance Brazil. As `description` de cada campo
     são repassadas a Claude via JSON Schema da tool — fundamentais pra ele

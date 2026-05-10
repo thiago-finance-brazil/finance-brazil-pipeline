@@ -6,7 +6,7 @@ Decision logic:
     reject   → should_reject == True OR confidence < 0.50
 
 Storage:
-    publish/flag → status='pending' (humano revisa)
+    publish/flag → status='review' (humano revisa)
     reject       → status='rejected' (não exposto publicamente)
 
 Esta camada apenas DECIDE. A persistência é responsabilidade da próxima fase.

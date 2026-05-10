@@ -5,7 +5,7 @@
         → corroboração (auto-match + busca externa)
         → geração (Claude Sonnet 4.6 com tool use forçado)
         → validação (confidence + warnings + filtros)
-        → save (articles status='pending'/'rejected' + pipeline_logs)
+        → save (articles status='review'/'rejected' + pipeline_logs)
 
 DRY_RUN=true (default) NÃO persiste no banco. Use DRY_RUN=false para gravar.
 
@@ -84,7 +84,7 @@ def _process_item(item, gen_categories, plog, run_id, settings, query_label) -> 
     )
 
     # === SAVE ===
-    target_status = "pending" if result.decision in ("publish", "flag") else "rejected"
+    target_status = "review" if result.decision in ("publish", "flag") else "rejected"
     if settings.dry_run:
         logger.info(
             f"    [DRY] Would save: slug={enriched['slug']} status={target_status}"

@@ -80,7 +80,7 @@ def save_article(
         payload: dict do `postprocess_article()` — contém title, subtitle,
             excerpt, content, slug, category_slug, impact_points, tags,
             source_quote, source_url, source_name, reading_time_minutes.
-        status: 'pending' (publish/flag) ou 'rejected'.
+        status: 'review' (publish/flag) ou 'rejected'.
         confidence_score: float 0.0-1.0 do orchestrator.
         validation_warnings: lista de warnings.
         secondary_sources: lista de NewsItem dumps (model_dump(mode='json')).
