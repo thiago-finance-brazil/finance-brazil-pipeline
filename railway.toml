@@ -1,10 +1,17 @@
 # Railway configuration for Finance Brazil pipeline.
 # Builder: Railpack (default) — auto-detecta pyproject.toml + uv.lock.
+#
+# Service tipo: Cron Job (não Service contínuo). Railway executa o
+# startCommand no schedule, e espera o processo terminar com exit 0.
+# Se o processo virar "long-running" sem exit, próximas execuções são
+# puladas (comportamento documentado da Railway).
 
 [deploy]
 startCommand = "python -m pipeline.main"
 
-# Cron schedule — definir após validação manual do pipeline.
-# Exemplo: roda 4x/dia (06h, 12h, 18h, 22h America/Sao_Paulo = UTC-3).
-# [deploy]
-# cronSchedule = "0 9,15,21,1 * * *"
+# Cron em UTC. Maio/2026 (sem DST no Brasil) = UTC-3.
+#   09:00 UTC → 06:00 BRT
+#   15:00 UTC → 12:00 BRT
+#   21:00 UTC → 18:00 BRT
+#   01:00 UTC → 22:00 BRT (dia anterior em UTC)
+cronSchedule = "0 9,15,21,1 * * *"
