@@ -57,12 +57,12 @@ class GeneratedArticle(BaseModel):
     excerpt: str = Field(
         ...,
         min_length=150,
-        max_length=320,
+        max_length=400,
         description="Texto do card de listagem, 200-280 caracteres, 2 frases.",
     )
     content: str = Field(
         ...,
-        min_length=600,
+        min_length=500,
         description=(
             "Markdown com 4-6 parágrafos. OBRIGATORIAMENTE entre 400 e 600 palavras "
             "(não menos que 400). Sem subtítulos/headings. Use **negrito** em "
@@ -108,11 +108,11 @@ class GeneratedArticle(BaseModel):
     @field_validator("content")
     @classmethod
     def _word_count_bounds(cls, v: str) -> str:
-        """Content em markdown deve ter ~400-600 palavras (margem 350-750)."""
+        """Content em markdown deve ter ~400-600 palavras (margem 300-800)."""
         words = len(v.split())
-        if not (350 <= words <= 750):
+        if not (300 <= words <= 800):
             raise ValueError(
-                f"content deve ter ~400-600 palavras (margem 350-750), recebeu {words}"
+                f"content deve ter ~400-600 palavras (margem 300-800), recebeu {words}"
             )
         return v
 

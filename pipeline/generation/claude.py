@@ -15,15 +15,21 @@ from typing import Any
 from anthropic import Anthropic
 from anthropic.types import ToolUseBlock
 from loguru import logger
+from pydantic import ValidationError
 
 from pipeline.config import get_settings
 from pipeline.generation.models import GeneratedArticle, GenerationResult
-from pipeline.generation.prompts import SYSTEM_PROMPT, build_user_prompt
+from pipeline.generation.prompts import (
+    SYSTEM_PROMPT,
+    build_retry_addendum,
+    build_user_prompt,
+)
 from pipeline.sources.models import CorroboratedItem
 
 DEFAULT_MODEL = "claude-sonnet-4-6"
 DEFAULT_MAX_TOKENS = 4000
 TOOL_NAME = "publish_article"
+MAX_ATTEMPTS = 2  # original + 1 retry com prompt mais rigoroso
 
 
 def _build_tool_schema() -> dict[str, Any]:
@@ -60,66 +66,90 @@ def generate_article(
 
     Raises:
         anthropic.APIError: falhas da API.
-        pydantic.ValidationError: se Claude retornar output que viola schema
-            (raro com tool use forçado, mas possível em casos extremos).
+        pydantic.ValidationError: se Claude violar bounds em AMBAS as
+            MAX_ATTEMPTS tentativas (1ª + retry com prompt rigoroso).
         ValueError: se a resposta não contiver tool_use.
     """
-    settings = get_settings()
-    client = Anthropic(api_key=settings.anthropic_api_key)
-
-    user_prompt = build_user_prompt(
-        primary=item.primary,
-        secondary=item.secondary_sources,
-        corroborated=item.corroborated,
-        categories=categories,
-    )
-
+    client = Anthropic(api_key=get_settings().anthropic_api_key)
     tool = _build_tool_schema()
 
-    logger.info(
-        f"Claude generate: {item.primary.title!r} "
-        f"({len(item.secondary_sources)} fontes secundárias, model={model})"
-    )
+    # Acumuladores de tokens — cobrem todas as tentativas (custo real total).
+    total_in = 0
+    total_out = 0
+    total_cache_create = 0
+    total_cache_read = 0
+    last_error: ValidationError | None = None
 
-    msg = client.messages.create(
-        model=model,
-        max_tokens=max_tokens,
-        system=[
-            {
-                "type": "text",
-                "text": SYSTEM_PROMPT,
-                "cache_control": {"type": "ephemeral"},
-            },
-        ],
-        messages=[{"role": "user", "content": user_prompt}],
-        tools=[tool],
-        tool_choice={"type": "tool", "name": TOOL_NAME},
-    )
+    for attempt in range(1, MAX_ATTEMPTS + 1):
+        user_prompt = build_user_prompt(
+            primary=item.primary,
+            secondary=item.secondary_sources,
+            corroborated=item.corroborated,
+            categories=categories,
+        )
+        if attempt > 1 and last_error is not None:
+            user_prompt += build_retry_addendum(last_error)
 
-    # Extrai o tool_use bloc — único elemento esperado dado tool_choice forçado
-    tool_blocks = [b for b in msg.content if isinstance(b, ToolUseBlock)]
-    if not tool_blocks:
-        logger.error(f"Resposta Claude sem tool_use: {msg.content!r}")
-        raise ValueError("Claude não chamou a tool publish_article")
-    if tool_blocks[0].name != TOOL_NAME:
-        raise ValueError(f"Tool inesperada: {tool_blocks[0].name}")
+        logger.info(
+            f"Claude generate (attempt {attempt}/{MAX_ATTEMPTS}): "
+            f"{item.primary.title!r} ({len(item.secondary_sources)} secundárias, model={model})"
+        )
 
-    article = GeneratedArticle.model_validate(tool_blocks[0].input)
+        msg = client.messages.create(
+            model=model,
+            max_tokens=max_tokens,
+            system=[
+                {
+                    "type": "text",
+                    "text": SYSTEM_PROMPT,
+                    "cache_control": {"type": "ephemeral"},
+                },
+            ],
+            messages=[{"role": "user", "content": user_prompt}],
+            tools=[tool],
+            tool_choice={"type": "tool", "name": TOOL_NAME},
+        )
 
-    usage = msg.usage
-    cache_creation = getattr(usage, "cache_creation_input_tokens", 0) or 0
-    cache_read = getattr(usage, "cache_read_input_tokens", 0) or 0
+        usage = msg.usage
+        total_in += usage.input_tokens
+        total_out += usage.output_tokens
+        total_cache_create += getattr(usage, "cache_creation_input_tokens", 0) or 0
+        total_cache_read += getattr(usage, "cache_read_input_tokens", 0) or 0
 
-    logger.success(
-        f"Claude OK: stop_reason={msg.stop_reason} "
-        f"in={usage.input_tokens} out={usage.output_tokens} "
-        f"cache_create={cache_creation} cache_read={cache_read}"
-    )
+        # Extrai o tool_use bloc — único elemento esperado dado tool_choice forçado
+        tool_blocks = [b for b in msg.content if isinstance(b, ToolUseBlock)]
+        if not tool_blocks:
+            logger.error(f"Resposta Claude sem tool_use: {msg.content!r}")
+            raise ValueError("Claude não chamou a tool publish_article")
+        if tool_blocks[0].name != TOOL_NAME:
+            raise ValueError(f"Tool inesperada: {tool_blocks[0].name}")
 
-    return GenerationResult(
-        article=article,
-        input_tokens=usage.input_tokens,
-        output_tokens=usage.output_tokens,
-        cache_creation_tokens=cache_creation,
-        cache_read_tokens=cache_read,
-    )
+        try:
+            article = GeneratedArticle.model_validate(tool_blocks[0].input)
+        except ValidationError as e:
+            last_error = e
+            logger.warning(
+                f"Pydantic violou bounds (attempt {attempt}/{MAX_ATTEMPTS}): {e}"
+            )
+            if attempt < MAX_ATTEMPTS:
+                continue
+            logger.error(
+                f"Falha Pydantic definitiva após {MAX_ATTEMPTS} tentativas"
+            )
+            raise
+
+        logger.success(
+            f"Claude OK em {attempt} attempt(s): stop_reason={msg.stop_reason} "
+            f"in_total={total_in} out_total={total_out} "
+            f"cache_create={total_cache_create} cache_read={total_cache_read}"
+        )
+        return GenerationResult(
+            article=article,
+            input_tokens=total_in,
+            output_tokens=total_out,
+            cache_creation_tokens=total_cache_create,
+            cache_read_tokens=total_cache_read,
+        )
+
+    # Defensive: o loop só sai por return ou raise. Se chegou aqui, há bug.
+    raise RuntimeError("generate_article: loop terminou sem return/raise")

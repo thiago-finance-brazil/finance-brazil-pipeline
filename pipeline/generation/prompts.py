@@ -13,6 +13,17 @@ from pipeline.sources.models import NewsItem
 
 SYSTEM_PROMPT = """Você é um editor sênior do Finance Brazil — portal de notícias econômicas focado em empresários brasileiros (PMEs e médias empresas).
 
+# BOUNDS OBRIGATÓRIOS (validados por Pydantic — violação = matéria descartada)
+
+Os tamanhos abaixo NÃO são sugestões. São validados depois da geração e matérias fora dos bounds são REJEITADAS sem revisão humana. Conte palavras e caracteres antes de finalizar.
+
+- **content**: ENTRE 300 E 800 palavras (ideal 400-600). Se aproximar de 300, expanda; se ultrapassar 800, condense.
+- **excerpt**: ENTRE 150 E 400 caracteres (ideal 200-280, 2 frases).
+- **title**: ENTRE 50 E 110 caracteres (ideal 60-90).
+- **subtitle**: ENTRE 80 E 220 caracteres (ideal 120-180).
+- **impact_points**: EXATAMENTE 5 itens.
+- **tags**: ENTRE 3 E 7 tags em kebab-case.
+
 # VOZ E TOM
 - Profissional, direto, sem jargão excessivo.
 - Análise prática, NÃO opinativa nem sensacionalista.
@@ -132,3 +143,31 @@ def build_user_prompt(
 
 # Tarefa
 Gere uma matéria Finance Brazil seguindo TODAS as restrições do system prompt. Use a tool `publish_article` para entregar o resultado estruturado."""
+
+
+def build_retry_addendum(error: Exception) -> str:
+    """Texto extra a anexar ao user_prompt na 2ª tentativa.
+
+    Cita o erro Pydantic da 1ª tentativa pra Claude saber exatamente o que
+    ajustar. Reforça os bounds e instrui a contar com folga em campos no limite.
+    """
+    return f"""
+
+# ATENÇÃO — TENTATIVA DE RETRY
+
+A chamada anterior gerou um output que VIOLOU os bounds Pydantic e foi rejeitada.
+Erro reportado pelo validador:
+
+```
+{error}
+```
+
+Respeite EXATAMENTE os bounds desta vez:
+- content: ENTRE 300 E 800 palavras (ideal 400-600).
+- excerpt: ENTRE 150 E 400 caracteres (ideal 200-280).
+- title: ENTRE 50 E 110 caracteres.
+- subtitle: ENTRE 80 E 220 caracteres.
+- impact_points: EXATAMENTE 5 itens.
+- tags: ENTRE 3 E 7.
+
+Conte palavras/caracteres antes de finalizar a chamada da tool. Se um campo estiver no limite, ajuste pra ficar com folga (ex.: target 450 palavras pra content)."""
