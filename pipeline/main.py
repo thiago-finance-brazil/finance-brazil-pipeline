@@ -192,7 +192,7 @@ def main() -> int:
             f"    {stage}: {metrics['duration_ms']:.0f}ms / ${metrics['cost_usd']:.4f}"
         )
 
-    plog.finalize(status="success" if plog.summary["errors"] == 0 else "partial")
+    plog.finalize(status="success" if plog.summary["errors"] == 0 else "warning")
     return 0
 
 
