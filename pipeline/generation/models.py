@@ -91,6 +91,21 @@ class GeneratedArticle(BaseModel):
         max_length=400,
         description="Trecho LITERAL da fonte primária (10-30 palavras). Não inventar.",
     )
+    image_query: str = Field(
+        ...,
+        min_length=3,
+        max_length=60,
+        description=(
+            "Query EM INGLÊS para buscar imagem no Unsplash. 2-5 palavras, "
+            "conceitual e visual. NUNCA nomes próprios (Selic, Copom, Petrobras, "
+            "nomes de pessoas). Use conceitos visuais universais. "
+            "Exemplos válidos: 'interest rates', 'stock market trading', "
+            "'oil refinery', 'tax forms', 'central bank building', "
+            "'corporate office', 'currency exchange'. "
+            "Exemplos INVÁLIDOS: 'Selic Copom', 'Roberto Campos Neto', "
+            "'Petrobras 1T26', 'reforma tributária'."
+        ),
+    )
 
     @field_validator("tags")
     @classmethod

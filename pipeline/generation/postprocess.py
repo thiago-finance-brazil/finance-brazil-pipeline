@@ -8,7 +8,10 @@ from __future__ import annotations
 
 from typing import Any
 
+from loguru import logger
+
 from pipeline.generation.models import GeneratedArticle
+from pipeline.generation.unsplash import fetch_image_url
 from pipeline.sources.models import NewsItem
 from pipeline.storage.supabase import _canonical_url
 from pipeline.utils.slugify import slugify
@@ -41,4 +44,14 @@ def postprocess_article(
     payload["reading_time_minutes"] = reading_time_minutes(article.content)
     payload["source_url"] = _canonical_url(primary.url)
     payload["source_name"] = primary.source_name
+
+    image_query = getattr(article, "image_query", None)
+    cover_url = fetch_image_url(image_query) if image_query else None
+    payload["cover_image_url"] = cover_url
+    if image_query:
+        if cover_url:
+            logger.info(f"Unsplash OK: '{image_query}' → {cover_url[:80]}…")
+        else:
+            logger.info(f"Unsplash: sem imagem pra query '{image_query}'")
+
     return payload

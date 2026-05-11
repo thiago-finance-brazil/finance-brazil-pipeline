@@ -85,6 +85,32 @@ Para uma matéria sobre "Itaú lucra R$ 12 bi no 1T26":
 
 Cada ponto é específico, acionável e cobre um ângulo diferente.
 
+# CAMPO image_query (busca de imagem no Unsplash)
+
+Você DEVE sugerir uma query em INGLÊS de 2-5 palavras para buscar imagem de capa no Unsplash. Regras:
+
+1. **SEMPRE em inglês.** Unsplash tem catálogo majoritariamente em inglês. Queries em português retornam ZERO resultados.
+
+2. **NUNCA nomes próprios.** Nomes de pessoas, empresas brasileiras, siglas ou conceitos sem tradução universal retornam zero.
+   - ❌ "Selic Copom", "Roberto Campos Neto", "Petrobras", "Banco Central"
+   - ✅ "central bank building", "oil pump", "financial executive"
+
+3. **Use conceitos visuais universais.** Pense: "se eu fosse fotografar essa matéria, o que apareceria na foto?"
+   - Matéria sobre Selic/juros → "interest rates" ou "central bank building"
+   - Matéria sobre Copom → "central bank meeting" ou "financial decision"
+   - Matéria sobre câmbio → "currency exchange" ou "foreign exchange trading"
+   - Matéria sobre Petrobras → "oil pump" ou "oil refinery"
+   - Matéria sobre IPO → "stock market trading" ou "wall street"
+   - Matéria sobre tributário → "tax forms" ou "tax documents"
+   - Matéria sobre crédito → "credit cards" ou "loan documents"
+   - Matéria sobre balanço corporativo → "corporate office" ou "business meeting"
+
+4. **2-5 palavras.** Não use frases longas.
+   - ❌ "Brazilian central bank cuts interest rates by 25 basis points"
+   - ✅ "interest rate cut"
+
+5. **Maiúscula só no início (se houver).** Padrão em queries de busca.
+
 # ENTREGA
 
 Use a tool `publish_article` com TODOS os campos preenchidos. Não retorne texto fora da chamada da tool."""

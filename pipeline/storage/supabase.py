@@ -79,7 +79,8 @@ def save_article(
     Args:
         payload: dict do `postprocess_article()` — contém title, subtitle,
             excerpt, content, slug, category_slug, impact_points, tags,
-            source_quote, source_url, source_name, reading_time_minutes.
+            source_quote, source_url, source_name, reading_time_minutes,
+            cover_image_url.
         status: 'review' (publish/flag) ou 'rejected'.
         confidence_score: float 0.0-1.0 do orchestrator.
         validation_warnings: lista de warnings.
@@ -110,6 +111,7 @@ def save_article(
         "excerpt": payload["excerpt"],
         "category_id": category_id,
         "reading_time_minutes": payload.get("reading_time_minutes"),
+        "cover_image_url": payload.get("cover_image_url"),
         "tags": payload.get("tags", []),
         "impact_points": payload.get("impact_points", []),
         "source_name": payload.get("source_name"),
