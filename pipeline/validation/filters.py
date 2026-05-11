@@ -11,7 +11,11 @@ from __future__ import annotations
 
 from pipeline.generation.models import GeneratedArticle
 from pipeline.sources.models import CorroboratedItem
-from pipeline.storage.supabase import check_duplicate_slug
+from pipeline.storage.supabase import (
+    check_duplicate_slug,
+    check_duplicate_source_url,
+    check_similar_title,
+)
 
 EXTREMELY_LOW_CONFIDENCE = 0.50
 MIN_PRIMARY_WEIGHT = 0.65
@@ -38,7 +42,18 @@ def should_reject(
     if check_duplicate_slug(slug):
         return True, "duplicate_slug"
 
-    # 2. extremely_low_confidence — único filtro real baseado no score
+    # 2. duplicate_source_url — mesma URL fonte, evita retry duplicado
+    if check_duplicate_source_url(item.primary.url):
+        return True, "duplicate_source_url"
+
+    # 3. similar_title — semântica de 24h, threshold 0.75
+    is_similar, conflict_title = check_similar_title(
+        article.title, lookback_hours=24, threshold=0.75
+    )
+    if is_similar:
+        return True, f"similar_title_to:{(conflict_title or '')[:60]}"
+
+    # 4. extremely_low_confidence — único filtro real baseado no score
     if confidence_score < EXTREMELY_LOW_CONFIDENCE:
         return True, "extremely_low_confidence"
 

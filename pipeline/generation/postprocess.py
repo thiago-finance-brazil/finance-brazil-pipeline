@@ -10,6 +10,7 @@ from typing import Any
 
 from pipeline.generation.models import GeneratedArticle
 from pipeline.sources.models import NewsItem
+from pipeline.storage.supabase import _canonical_url
 from pipeline.utils.slugify import slugify
 
 WORDS_PER_MINUTE = 200
@@ -38,6 +39,6 @@ def postprocess_article(
     payload = article.model_dump()
     payload["slug"] = slugify(article.title)
     payload["reading_time_minutes"] = reading_time_minutes(article.content)
-    payload["source_url"] = primary.url
+    payload["source_url"] = _canonical_url(primary.url)
     payload["source_name"] = primary.source_name
     return payload

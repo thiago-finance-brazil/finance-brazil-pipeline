@@ -164,3 +164,79 @@ def check_duplicate_slug(slug: str) -> bool:
     return (response.count or 0) > 0
 
 
+def _canonical_url(url: str) -> str:
+    """Normaliza URL pra comparação: remove tracking params + trailing /."""
+    from urllib.parse import parse_qs, urlencode, urlparse, urlunparse
+
+    if not url:
+        return ""
+    parsed = urlparse(url.strip().rstrip("/"))
+    tracking_prefixes = ("utm_", "fbclid", "gclid", "ref", "_ga")
+    clean_params = {
+        k: v
+        for k, v in parse_qs(parsed.query).items()
+        if not any(k.startswith(p) for p in tracking_prefixes)
+    }
+    return urlunparse(
+        (
+            parsed.scheme,
+            parsed.netloc,
+            parsed.path,
+            parsed.params,
+            urlencode(clean_params, doseq=True),
+            "",
+        )
+    )
+
+
+def check_duplicate_source_url(url: str) -> bool:
+    """True se source_url canonical já existe na base (qualquer status)."""
+    if not url:
+        return False
+    canonical = _canonical_url(url)
+    if not canonical:
+        return False
+    client = get_client()
+    response = (
+        client.table("articles")
+        .select("id", count="exact")
+        .eq("source_url", canonical)
+        .limit(1)
+        .execute()
+    )
+    return (response.count or 0) > 0
+
+
+def check_similar_title(
+    title: str, lookback_hours: int = 24, threshold: float = 0.75
+) -> tuple[bool, str | None]:
+    """True se existe título similar (SequenceMatcher.ratio) publicado
+    nas últimas N horas. Retorna (is_similar, conflicting_title)."""
+    from datetime import datetime, timedelta, timezone
+    from difflib import SequenceMatcher
+
+    if not title:
+        return False, None
+    client = get_client()
+    cutoff = (
+        datetime.now(timezone.utc) - timedelta(hours=lookback_hours)
+    ).isoformat()
+    response = (
+        client.table("articles")
+        .select("title")
+        .gte("created_at", cutoff)
+        .execute()
+    )
+    rows = response.data or []
+    for row in rows:
+        existing_title = row.get("title", "")
+        if not existing_title:
+            continue
+        ratio = SequenceMatcher(
+            None, title.lower(), existing_title.lower()
+        ).ratio()
+        if ratio >= threshold:
+            return True, existing_title
+    return False, None
+
+
