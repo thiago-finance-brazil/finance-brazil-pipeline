@@ -30,6 +30,7 @@ class Settings(BaseModel):
     log_level: str = Field(default="INFO")
     dry_run: bool = Field(default=True)
     unsplash_access_key: str = Field(default="")
+    source_mode: str = Field(default="rss")
 
 
 @lru_cache(maxsize=1)
@@ -44,6 +45,7 @@ def get_settings() -> Settings:
             log_level=os.environ.get("LOG_LEVEL", "INFO"),
             dry_run=os.environ.get("DRY_RUN", "true").lower() in ("true", "1", "yes"),
             unsplash_access_key=os.environ.get("UNSPLASH_ACCESS_KEY", ""),
+            source_mode=os.environ.get("SOURCE_MODE", "rss"),
         )
     except KeyError as e:
         logger.error(f"Variável de ambiente obrigatória não definida: {e}")

@@ -30,6 +30,7 @@ from pipeline.generation.claude import generate_article
 from pipeline.generation.postprocess import postprocess_article
 from pipeline.sources.corroborate import corroborate
 from pipeline.sources.perplexity import search_news
+from pipeline.sources.rss import RSS_FEEDS, fetch_rss_news
 from pipeline.sources.whitelist import load_whitelist
 from pipeline.storage.logger import PipelineLogger
 from pipeline.storage.supabase import load_categories, save_article
@@ -129,49 +130,107 @@ def main() -> int:
         f"Whitelist: {len(whitelist)} fontes | Categorias: {len(gen_categories)}"
     )
 
-    for query in QUERIES:
-        plog.inc("queries")
+    if settings.source_mode == "rss":
+        # RSS mode: lê 1 vez, processa em lote
         logger.info("")
-        logger.info(f"Query: {query!r}")
+        logger.info(f"Source mode: RSS ({len(RSS_FEEDS)} feeds)")
         try:
-            # === SEARCH (primária + corroboração) ===
             t0 = time.perf_counter()
-            primary = search_news(query, whitelist, max_results=5, min_weight=0.65)
-            if not primary.items:
-                logger.warning(f"  Query sem itens whitelisted, pulando.")
+            rss_result = fetch_rss_news(whitelist)
+            plog.inc("queries")  # RSS conta como 1 "query" no log
+
+            if not rss_result.items:
+                logger.warning("RSS sem itens whitelisted, nada a processar.")
+            else:
+                # Limite total de matérias por run em RSS mode
+                MAX_ARTICLES_TOTAL = 10
+                # Cap ANTES de corroborate: rss_result.items já vem ordenado por weight desc
+                items_to_corroborate = rss_result.items[:MAX_ARTICLES_TOTAL]
+                logger.info(
+                    f"RSS: {len(rss_result.items)} itens disponíveis, "
+                    f"corroborando top {len(items_to_corroborate)} (cap={MAX_ARTICLES_TOTAL})"
+                )
+
+                corroborated, cost_corr = corroborate(
+                    items_to_corroborate, whitelist, min_sources=2
+                )
                 search_ms = (time.perf_counter() - t0) * 1000
-                search_cost = perplexity_cost(primary.input_tokens, primary.output_tokens)
+                search_cost = perplexity_cost(
+                    cost_corr["input_tokens"], cost_corr["output_tokens"]
+                )
                 plog.add_stage_cost("search", duration_ms=search_ms, cost_usd=search_cost)
-                continue
 
-            corroborated, cost_corr = corroborate(primary.items, whitelist, min_sources=2)
-            search_ms = (time.perf_counter() - t0) * 1000
-            search_cost = perplexity_cost(
-                primary.input_tokens + cost_corr["input_tokens"],
-                primary.output_tokens + cost_corr["output_tokens"],
-            )
-            plog.add_stage_cost("search", duration_ms=search_ms, cost_usd=search_cost)
+                top_n = corroborated  # já é o tamanho certo
+                logger.info(
+                    f"RSS: {len(corroborated)} corroborados, processando {len(top_n)}"
+                )
 
-            top_n = corroborated[:MAX_ARTICLES_PER_QUERY]
-            logger.info(
-                f"  {len(primary.items)} primários, {len(corroborated)} corroborados, "
-                f"processando {len(top_n)} (cap MAX_ARTICLES_PER_QUERY={MAX_ARTICLES_PER_QUERY})"
-            )
-
-            for item in top_n:
-                try:
-                    _process_item(item, gen_categories, plog, run_id, settings, query)
-                except Exception as e:  # noqa: BLE001
-                    msg = f"item {item.primary.title[:60]!r}: {e}"
-                    logger.exception(msg)
-                    plog.record_error("item", msg)
-                    continue
+                for item in top_n:
+                    try:
+                        _process_item(item, gen_categories, plog, run_id, settings, "rss")
+                    except Exception as e:  # noqa: BLE001
+                        msg = f"item {item.primary.title[:60]!r}: {e}"
+                        logger.exception(msg)
+                        plog.record_error("item", msg)
+                        continue
 
         except Exception as e:  # noqa: BLE001
-            msg = f"query {query!r}: {e}"
+            msg = f"rss fetch: {e}"
             logger.exception(msg)
-            plog.record_error("query", msg)
-            continue
+            plog.record_error("rss", msg)
+
+    elif settings.source_mode == "perplexity":
+        # Comportamento legado: queries fixas via Perplexity (preservado)
+        logger.info(f"Source mode: Perplexity ({len(QUERIES)} queries)")
+        for query in QUERIES:
+            plog.inc("queries")
+            logger.info("")
+            logger.info(f"Query: {query!r}")
+            try:
+                # === SEARCH (primária + corroboração) ===
+                t0 = time.perf_counter()
+                primary = search_news(query, whitelist, max_results=5, min_weight=0.65)
+                if not primary.items:
+                    logger.warning(f"  Query sem itens whitelisted, pulando.")
+                    search_ms = (time.perf_counter() - t0) * 1000
+                    search_cost = perplexity_cost(primary.input_tokens, primary.output_tokens)
+                    plog.add_stage_cost("search", duration_ms=search_ms, cost_usd=search_cost)
+                    continue
+
+                corroborated, cost_corr = corroborate(primary.items, whitelist, min_sources=2)
+                search_ms = (time.perf_counter() - t0) * 1000
+                search_cost = perplexity_cost(
+                    primary.input_tokens + cost_corr["input_tokens"],
+                    primary.output_tokens + cost_corr["output_tokens"],
+                )
+                plog.add_stage_cost("search", duration_ms=search_ms, cost_usd=search_cost)
+
+                top_n = corroborated[:MAX_ARTICLES_PER_QUERY]
+                logger.info(
+                    f"  {len(primary.items)} primários, {len(corroborated)} corroborados, "
+                    f"processando {len(top_n)} (cap MAX_ARTICLES_PER_QUERY={MAX_ARTICLES_PER_QUERY})"
+                )
+
+                for item in top_n:
+                    try:
+                        _process_item(item, gen_categories, plog, run_id, settings, query)
+                    except Exception as e:  # noqa: BLE001
+                        msg = f"item {item.primary.title[:60]!r}: {e}"
+                        logger.exception(msg)
+                        plog.record_error("item", msg)
+                        continue
+
+            except Exception as e:  # noqa: BLE001
+                msg = f"query {query!r}: {e}"
+                logger.exception(msg)
+                plog.record_error("query", msg)
+                continue
+
+    else:
+        logger.error(
+            f"SOURCE_MODE inválido: {settings.source_mode!r}. Use 'rss' ou 'perplexity'."
+        )
+        return 1
 
     # === FINALIZE ===
     logger.info("")
