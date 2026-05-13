@@ -30,7 +30,7 @@ from pipeline.generation.claude import generate_article
 from pipeline.generation.postprocess import postprocess_article
 from pipeline.sources.corroborate import corroborate
 from pipeline.sources.perplexity import search_news
-from pipeline.sources.rss import RSS_FEEDS, fetch_rss_news
+from pipeline.sources.rss import RSS_FEEDS, fetch_rss_news, pick_balanced
 from pipeline.sources.whitelist import load_whitelist
 from pipeline.storage.logger import PipelineLogger
 from pipeline.storage.supabase import load_categories, save_article
@@ -144,11 +144,18 @@ def main() -> int:
             else:
                 # Limite total de matérias por run em RSS mode
                 MAX_ARTICLES_TOTAL = 10
-                # Cap ANTES de corroborate: rss_result.items já vem ordenado por weight desc
-                items_to_corroborate = rss_result.items[:MAX_ARTICLES_TOTAL]
+                PER_SOURCE = 3
+                # Round-robin: garante diversidade entre veículos
+                items_to_corroborate = pick_balanced(
+                    rss_result.items,
+                    max_total=MAX_ARTICLES_TOTAL,
+                    per_source=PER_SOURCE,
+                )
+                picked_sources = sorted({i.source_name for i in items_to_corroborate})
                 logger.info(
-                    f"RSS: {len(rss_result.items)} itens disponíveis, "
-                    f"corroborando top {len(items_to_corroborate)} (cap={MAX_ARTICLES_TOTAL})"
+                    f"RSS: {len(rss_result.items)} disponíveis, "
+                    f"picked {len(items_to_corroborate)} balanceadas "
+                    f"({len(picked_sources)} fontes: {', '.join(picked_sources)})"
                 )
 
                 corroborated, cost_corr = corroborate(

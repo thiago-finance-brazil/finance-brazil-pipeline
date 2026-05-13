@@ -71,6 +71,63 @@ def _is_recent(published_at: datetime | None, max_age_hours: int) -> bool:
     return published_at >= cutoff
 
 
+def pick_balanced(
+    items: list[NewsItem],
+    *,
+    max_total: int = 10,
+    per_source: int = 3,
+) -> list[NewsItem]:
+    """Round-robin por source_name pra garantir diversidade.
+
+    Estratégia:
+    1. Agrupa items por source_name (mantém ordem original dentro do grupo,
+       que já está ordenada por weight/published_at do feedparser).
+    2. Pra cada fonte, pega no máximo `per_source` matérias.
+    3. Intercala round-robin: 1ª de cada fonte, 2ª de cada fonte, etc.
+    4. Trunca em `max_total`.
+
+    Exemplo (5 fontes, per_source=3, max_total=10):
+    - InfoMoney tem 10 matérias → pega 3
+    - Seu Dinheiro tem 8 → pega 3
+    - NeoFeed tem 10 → pega 3
+    - Brazil Journal tem 10 → pega 3
+    - Money Times tem 10 → pega 3
+    Total: 15 candidatos → intercala → trunca em 10
+    Result: 2 InfoMoney, 2 SD, 2 NF, 2 BJ, 2 MT (perfeito 5x2)
+
+    Edge case: se 1 fonte tem 0 matérias, skipa sem erro.
+    Edge case: se total < max_total, retorna o que tem.
+    """
+    if not items:
+        return []
+
+    # Agrupa por source_name preservando ordem original
+    by_source: dict[str, list[NewsItem]] = {}
+    for item in items:
+        by_source.setdefault(item.source_name, []).append(item)
+
+    # Pega top `per_source` de cada fonte
+    trimmed: dict[str, list[NewsItem]] = {
+        source: items_list[:per_source]
+        for source, items_list in by_source.items()
+    }
+
+    # Round-robin: pega 1ª de cada fonte, depois 2ª, etc
+    # Ordena nomes pra ser determinístico (alfabético)
+    sources_ordered = sorted(trimmed.keys())
+    max_per_source = max((len(v) for v in trimmed.values()), default=0)
+
+    balanced: list[NewsItem] = []
+    for round_idx in range(max_per_source):
+        for source in sources_ordered:
+            if round_idx < len(trimmed[source]):
+                balanced.append(trimmed[source][round_idx])
+                if len(balanced) >= max_total:
+                    return balanced
+
+    return balanced
+
+
 def fetch_rss_news(
     whitelist: dict[str, WhitelistEntry],
     *,
@@ -152,13 +209,23 @@ def fetch_rss_news(
             logger.error(f"  Falha lendo {source_name}: {e}")
             continue
 
-    # Ordena por weight desc (mesma lógica do Perplexity)
-    all_items.sort(key=lambda n: n.source_weight, reverse=True)
+    # NÃO ordena mais por weight desc — pick_balanced() cuida disso depois.
+    # Mantém ordem natural dos feeds (mais recentes primeiro dentro de cada).
+
+    # Log de distribuição por fonte (debug de diversidade)
+    by_source_count: dict[str, int] = {}
+    for item in all_items:
+        by_source_count[item.source_name] = by_source_count.get(item.source_name, 0) + 1
+    distribution = ", ".join(
+        f"{s}={c}" for s, c in sorted(by_source_count.items())
+    )
 
     logger.info(
         f"RSS OK: {stats['raw']} brutos → {stats['kept']} mantidos "
         f"(stale={stats['stale']}, not_whitelisted={stats['not_whitelisted']}, "
         f"low_weight={stats['low_weight']})"
     )
+    if distribution:
+        logger.info(f"RSS distribuição: {distribution}")
 
     return RssResult(items=all_items)
