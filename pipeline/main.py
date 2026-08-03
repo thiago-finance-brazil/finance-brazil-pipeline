@@ -5,7 +5,11 @@
         → corroboração (auto-match + busca externa)
         → geração (Claude Sonnet 4.6 com tool use forçado)
         → validação (confidence + warnings + filtros)
-        → save (articles status='review'/'rejected' + pipeline_logs)
+        → save (articles status='published'/'review'/'rejected' + pipeline_logs)
+
+Auto-publicação: publish/flag grava direto como 'published', exceto categoria
+política e matérias de loteria, que ficam em 'review' pra aprovação manual.
+Ver `pipeline/validation/autopublish.py`.
 
 DRY_RUN=true (default) NÃO persiste no banco. Use DRY_RUN=false para gravar.
 
@@ -35,6 +39,7 @@ from pipeline.sources.whitelist import load_whitelist
 from pipeline.storage.logger import PipelineLogger
 from pipeline.storage.supabase import load_categories, save_article
 from pipeline.utils.cost_tracker import claude_sonnet_cost, perplexity_cost
+from pipeline.validation.autopublish import should_autopublish
 from pipeline.validation.orchestrator import validate
 
 # TODO Dia 6+: mover pra config externa (queries.yml ou tabela queries).
@@ -85,7 +90,23 @@ def _process_item(item, gen_categories, plog, run_id, settings, query_label) -> 
     )
 
     # === SAVE ===
-    target_status = "review" if result.decision in ("publish", "flag") else "rejected"
+    # Auto-publicação: publish/flag vai direto pro ar, exceto política e
+    # loteria — que continuam na fila de revisão manual (ver
+    # validation/autopublish.py). reject segue inalterado.
+    if result.decision in ("publish", "flag"):
+        can_autopublish, hold_reason = should_autopublish(
+            enriched["category_slug"], enriched["title"]
+        )
+        if can_autopublish:
+            target_status = "published"
+            plog.inc("auto_published")
+        else:
+            target_status = "review"
+            plog.inc("held_for_review")
+            logger.info(f"    → review: {hold_reason}")
+    else:
+        target_status = "rejected"
+
     if settings.dry_run:
         logger.info(
             f"    [DRY] Would save: slug={enriched['slug']} status={target_status}"
@@ -248,6 +269,8 @@ def main() -> int:
     logger.info(f"  queries:    {s['queries']}")
     logger.info(f"  generated:  {s['generated']}")
     logger.info(f"  saved:      {s['saved']}")
+    logger.info(f"  published:  {s.get('auto_published', 0)} (auto)")
+    logger.info(f"  review:     {s.get('held_for_review', 0)} (política/loteria)")
     logger.info(f"  publish:    {s['publish']}")
     logger.info(f"  flag:       {s['flag']}")
     logger.info(f"  reject:     {s['reject']}")

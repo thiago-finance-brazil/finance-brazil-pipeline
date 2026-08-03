@@ -5,6 +5,7 @@ para o cliente — só usar em ambientes server-side controlados (Railway, dev l
 """
 from __future__ import annotations
 
+from datetime import datetime, timezone
 from functools import lru_cache
 from typing import Any, TypedDict
 from uuid import UUID
@@ -81,7 +82,10 @@ def save_article(
             excerpt, content, slug, category_slug, impact_points, tags,
             source_quote, source_url, source_name, reading_time_minutes,
             cover_image_url.
-        status: 'review' (publish/flag) ou 'rejected'.
+        status: 'published' (auto-publicada), 'review' (aprovação manual)
+            ou 'rejected'. Em 'published' o campo `published_at` é gravado
+            explicitamente — o trigger set_articles_published_at só dispara
+            em UPDATE, e a view v_published_articles ordena por published_at.
         confidence_score: float 0.0-1.0 do orchestrator.
         validation_warnings: lista de warnings.
         secondary_sources: lista de NewsItem dumps (model_dump(mode='json')).
@@ -123,6 +127,13 @@ def save_article(
         "pipeline_run_id": str(run_id),
         "status": status,
     }
+
+    # published_at só é gravado no INSERT de matéria auto-publicada: o trigger
+    # set_articles_published_at dispara em UPDATE (aprovação manual no /admin),
+    # não em INSERT. Sem isso a matéria não apareceria na home, que lê a view
+    # v_published_articles ordenada por published_at DESC.
+    if status == "published":
+        row["published_at"] = datetime.now(timezone.utc).isoformat()
 
     client = get_client()
     try:
